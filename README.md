@@ -1,0 +1,2 @@
+# Motivation
+Inspired by https://docs.openfaas.com/architecture/autoscaling/, self-implemented auto-scaling. Faas-autoscaler is a client that periodically tracks the request load of each function and performs auto-scaling
