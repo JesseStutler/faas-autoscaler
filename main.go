@@ -78,13 +78,6 @@ func getFunctionStatus(ctx context.Context, proxyClient *proxy.Client, prometheu
 
 func periodicScaler(ctx context.Context, gatewayQuery scaling.ServiceQuery, prometheusQuery metrics.PrometheusQuery,
 	function types.FunctionStatus, ticker *time.Ticker, errCh chan<- error) {
-	err := sender.LoadBasedScalingSender(gatewayQuery, prometheusQuery, DefaultNamespace, function.Name) //first call, before the ticker works
-	if err != nil {
-		log.Println(err.Error())
-		ticker.Stop()
-		errCh <- err
-		return
-	}
 	for {
 		select {
 		case <-ticker.C:
