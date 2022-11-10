@@ -6,8 +6,9 @@ import (
 	"github.com/jessestutler/faas-autoscaler/pkg/sender"
 	"github.com/openfaas/faas-cli/commands"
 	"github.com/openfaas/faas-cli/proxy"
+	"github.com/openfaas/faas-provider/types"
 	"github.com/openfaas/faas/gateway/metrics"
-	"github.com/openfaas/faas/gateway/types"
+	"github.com/openfaas/faas/gateway/scaling"
 	"log"
 	"net/http"
 	"time"
@@ -35,10 +36,11 @@ func main() {
 	updateTicker := time.NewTicker(30 * time.Second)
 	errCh := make(chan error)
 	functionTracing := make(map[string]struct{})
+	getFunctionStatus(ctx, proxyClient, prometheusClient, autoScalerConfig, functionTracing, errCh) //first call, before the ticker works
 	for {
 		select {
 		case <-updateTicker.C:
-			go getFunctionStatus(ctx, proxyClient, prometheusClient, autoScalerConfig, functionTracing, errCh)
+			getFunctionStatus(ctx, proxyClient, prometheusClient, autoScalerConfig, functionTracing, errCh)
 		case <-errCh:
 			updateTicker.Stop()
 			cancel()
@@ -69,24 +71,34 @@ func getFunctionStatus(ctx context.Context, proxyClient *proxy.Client, prometheu
 				//use default setting
 				ticker = time.NewTicker(config.DefaultTicker * time.Second)
 			}
-			go func(ctx context.Context) {
-				for {
-					select {
-					case <-ticker.C:
-						err := sender.LoadBasedScalingSender(gatewayQuery, prometheusQuery, DefaultNamespace, function.Name)
-						if err != nil {
-							log.Println(err.Error())
-							ticker.Stop()
-							errCh <- err
-							return
-						}
-					case <-ctx.Done():
-						//other goroutines met error
-						ticker.Stop()
-						return
-					}
-				}
-			}(ctx)
+			go periodicScaler(ctx, gatewayQuery, prometheusQuery, function, ticker, errCh)
+		}
+	}
+}
+
+func periodicScaler(ctx context.Context, gatewayQuery scaling.ServiceQuery, prometheusQuery metrics.PrometheusQuery,
+	function types.FunctionStatus, ticker *time.Ticker, errCh chan<- error) {
+	err := sender.LoadBasedScalingSender(gatewayQuery, prometheusQuery, DefaultNamespace, function.Name) //first call, before the ticker works
+	if err != nil {
+		log.Println(err.Error())
+		ticker.Stop()
+		errCh <- err
+		return
+	}
+	for {
+		select {
+		case <-ticker.C:
+			err := sender.LoadBasedScalingSender(gatewayQuery, prometheusQuery, DefaultNamespace, function.Name)
+			if err != nil {
+				log.Println(err.Error())
+				ticker.Stop()
+				errCh <- err
+				return
+			}
+		case <-ctx.Done():
+			//other goroutines met error
+			ticker.Stop()
+			return
 		}
 	}
 }

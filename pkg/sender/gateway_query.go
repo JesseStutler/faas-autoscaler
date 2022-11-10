@@ -13,7 +13,7 @@ type GatewayQuery struct {
 }
 
 func NewGatewayQuery(proxyClient *proxy.Client) scaling.ServiceQuery {
-	return GatewayQuery{
+	return &GatewayQuery{
 		ProxyClient: proxyClient,
 	}
 }

@@ -7,7 +7,7 @@ import (
 
 const (
 	//DefaultTicker is a ticker for periodic scaling, the unit is seconds, the default is 30 seconds
-	DefaultTicker = 30
+	DefaultTicker = 5
 
 	//TickerLabel can change the ticker setting
 	TickerLabel = "com.openfaas.scale.ticker"
