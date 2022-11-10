@@ -1,7 +1,5 @@
 package config
 
-import "github.com/openfaas/faas/gateway/types"
-
 type AutoScalerConfig struct {
 	PrometheusHost    string
 	PrometheusPort    int
@@ -10,13 +8,13 @@ type AutoScalerConfig struct {
 	BasicAuthPassword string
 }
 
-func ReadConfig(hasEnv types.HasEnv) *AutoScalerConfig {
+func ReadConfig() *AutoScalerConfig {
 	cfg := &AutoScalerConfig{
-		PrometheusPort: 9090,
+		PrometheusPort:    31114,
+		PrometheusHost:    "10.2.0.120",
+		GatewayAddress:    "http://10.2.0.120:31112",
+		BasicAuthUser:     "admin",
+		BasicAuthPassword: "admin",
 	}
-	cfg.PrometheusHost = hasEnv.Getenv("prometheus_host")        // in helm
-	cfg.GatewayAddress = hasEnv.Getenv("gateway_address")        // in helm
-	cfg.BasicAuthUser = hasEnv.Getenv("basic_auth_user")         // in dockerfile, only for testing
-	cfg.BasicAuthPassword = hasEnv.Getenv("basic_auth_password") // in dockerfile, only for testing
 	return cfg
 }
