@@ -29,7 +29,7 @@ func main() {
 		Timeout: 5 * time.Second,
 	}
 	if err != nil {
-		log.Println(err.Error())
+		log.Printf("Unable to create prometheus client, the error is %s", err.Error())
 		return
 	}
 	updateTicker := time.NewTicker(30 * time.Second)

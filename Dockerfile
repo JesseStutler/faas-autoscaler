@@ -18,16 +18,13 @@ RUN addgroup -S app \
 
 WORKDIR /home/app
 
-ENV gateway_address="http://127.0.0.1:8080/"
+# Advise to decode the secret mounted in the container, only for testing here
 ENV basic_auth_user="admin"
 ENV basic_auth_password="admin"
 
-COPY --from=build /go/src/ggithub.com/jessestutler/faas-autoscaler/autoscaler    .
-COPY assets     assets
+COPY --from=build /go/src/github.com/jessestutler/faas-autoscaler/autoscaler    .
 
 ARG TARGETPLATFORM
-
-RUN if [ "$TARGETPLATFORM" = "linux/arm/v7" ] ; then sed -ie s/x86_64/armhf/g assets/script/funcstore.js ; elif [ "$TARGETPLATFORM" = "linux/arm64" ] ; then sed -ie s/x86_64/arm64/g assets/script/funcstore.js; fi
 
 RUN chown -R app:app ./
 
