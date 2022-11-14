@@ -1,20 +1,24 @@
 package config
 
+import "time"
+
 type AutoScalerConfig struct {
-	PrometheusHost    string
-	PrometheusPort    int
-	GatewayAddress    string
-	BasicAuthUser     string
-	BasicAuthPassword string
+	PrometheusHost     string
+	PrometheusPort     int
+	GatewayAddress     string
+	BasicAuthUser      string
+	BasicAuthPassword  string
+	DecreasingDuration time.Duration
 }
 
 func ReadConfig() *AutoScalerConfig {
 	cfg := &AutoScalerConfig{
-		PrometheusPort:    31114,
-		PrometheusHost:    "10.2.0.120",
-		GatewayAddress:    "http://10.2.0.120:31112",
-		BasicAuthUser:     "admin",
-		BasicAuthPassword: "admin",
+		PrometheusPort:     31114,
+		PrometheusHost:     "10.2.0.120",
+		GatewayAddress:     "http://10.2.0.120:31112",
+		BasicAuthUser:      "admin",
+		BasicAuthPassword:  "admin",
+		DecreasingDuration: 30 * time.Second,
 	}
 	return cfg
 }

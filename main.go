@@ -6,10 +6,8 @@ import (
 	"github.com/jessestutler/faas-autoscaler/pkg/sender"
 	"github.com/openfaas/faas-cli/commands"
 	"github.com/openfaas/faas-cli/proxy"
-	"github.com/openfaas/faas-provider/types"
 	"github.com/openfaas/faas/gateway/metrics"
-	"github.com/openfaas/faas/gateway/scaling"
-	"log"
+	"github.com/sirupsen/logrus"
 	"net/http"
 	"time"
 )
@@ -20,7 +18,6 @@ const (
 
 func main() {
 	autoScalerConfig := config.ReadConfig()
-	ctx, cancel := context.WithCancel(context.Background())
 	cliAuth := config.NewBasicAuth(autoScalerConfig.BasicAuthPassword, autoScalerConfig.BasicAuthPassword)
 	timeout := time.Second * 60
 	transport := commands.GetDefaultCLITransport(false, &timeout)
@@ -29,39 +26,42 @@ func main() {
 		Timeout: 5 * time.Second,
 	}
 	if err != nil {
-		log.Printf("Unable to create prometheus client, the error is %s", err.Error())
+		logrus.Errorf("Unable to create prometheus client, the error is %s", err.Error())
 		return
 	}
 	updateTicker := time.NewTicker(30 * time.Second)
-	errCh := make(chan error)
 	functionTracing := make(map[string]struct{})
-	getFunctionStatus(ctx, proxyClient, prometheusClient, autoScalerConfig, functionTracing, errCh) //first call, before the ticker works
+	getFunctionStatus(proxyClient, prometheusClient, autoScalerConfig, functionTracing) //first call, before the ticker works
 	for {
 		select {
 		case <-updateTicker.C:
-			getFunctionStatus(ctx, proxyClient, prometheusClient, autoScalerConfig, functionTracing, errCh)
-		case <-errCh:
-			updateTicker.Stop()
-			cancel()
-			return
+			getFunctionStatus(proxyClient, prometheusClient, autoScalerConfig, functionTracing)
 		}
 	}
 }
 
 //get FunctionStatus and update the timer map periodically
-func getFunctionStatus(ctx context.Context, proxyClient *proxy.Client, prometheusClient *http.Client, autoScalerConfig *config.AutoScalerConfig,
-	functionsTracing map[string]struct{}, errCh chan<- error) {
+func getFunctionStatus(proxyClient *proxy.Client, prometheusClient *http.Client, autoScalerConfig *config.AutoScalerConfig,
+	functionsTracing map[string]struct{}) {
 	gatewayQuery := sender.NewGatewayQuery(proxyClient)
 	prometheusQuery := metrics.NewPrometheusQuery(autoScalerConfig.PrometheusHost, autoScalerConfig.PrometheusPort, prometheusClient)
 	functions, err := proxyClient.ListFunctions(context.Background(), DefaultNamespace)
 	if err != nil {
-		log.Println(err.Error())
-		errCh <- err
+		logrus.Errorf("Unable to list functions status, the error is %s", err.Error())
 		return
 	}
 	for _, function := range functions {
 		if _, exist := functionsTracing[function.Name]; !exist {
+			functionsTracing[function.Name] = struct{}{}
 			var ticker *time.Ticker
+			scaler := &sender.Scaler{
+				GatewayQuery:       gatewayQuery,
+				PrometheusQuery:    prometheusQuery,
+				FunctionNamespace:  DefaultNamespace,
+				FunctionName:       function.Name,
+				DecreasingDuration: autoScalerConfig.DecreasingDuration,
+				CancelChan:         make(chan struct{}),
+			}
 			if function.Labels != nil {
 				labels := *function.Labels
 				tickerSetting := config.ExtractLabelValue(labels[config.TickerLabel], config.DefaultTicker)
@@ -70,27 +70,16 @@ func getFunctionStatus(ctx context.Context, proxyClient *proxy.Client, prometheu
 				//use default setting
 				ticker = time.NewTicker(config.DefaultTicker * time.Second)
 			}
-			go periodicScaler(ctx, gatewayQuery, prometheusQuery, function, ticker, errCh)
+			go periodicScaler(scaler, ticker)
 		}
 	}
 }
 
-func periodicScaler(ctx context.Context, gatewayQuery scaling.ServiceQuery, prometheusQuery metrics.PrometheusQuery,
-	function types.FunctionStatus, ticker *time.Ticker, errCh chan<- error) {
+func periodicScaler(scaler *sender.Scaler, ticker *time.Ticker) {
 	for {
 		select {
 		case <-ticker.C:
-			err := sender.LoadBasedScalingSender(gatewayQuery, prometheusQuery, DefaultNamespace, function.Name)
-			if err != nil {
-				log.Println(err.Error())
-				ticker.Stop()
-				errCh <- err
-				return
-			}
-		case <-ctx.Done():
-			//other goroutines met error
-			ticker.Stop()
-			return
+			scaler.ScalingBasedOnLoad()
 		}
 	}
 }
