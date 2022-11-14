@@ -4,46 +4,116 @@ import (
 	"fmt"
 	"github.com/openfaas/faas/gateway/metrics"
 	"github.com/openfaas/faas/gateway/scaling"
-	"log"
+	"github.com/sirupsen/logrus"
 	"math"
 	"strconv"
+	"time"
 )
 
-func LoadBasedScalingSender(service scaling.ServiceQuery, prometheusQuery metrics.PrometheusQueryFetcher, defaultNamespace string, serviceName string) error {
-	err := judgeIfNeedScaleService(service, prometheusQuery, defaultNamespace, serviceName)
-	return err
+type Scaler struct {
+	GatewayQuery      scaling.ServiceQuery
+	PrometheusQuery   metrics.PrometheusQuery
+	FunctionNamespace string
+	FunctionName      string
+
+	//Represents load situation, if the load is decreasing, the NonDeceasing flag will be false, and the DecreasingTimer will be turned on,
+	NonDecreasing bool
+	//The number of replicas will be scaled down if timer is triggered, if NonDecreasing is true, the timer will be shut down.
+	DecreasingTimer    *time.Timer
+	DecreasingDuration time.Duration
+
+	//CancelChan is used to prevent goroutine leak when DecreasingTimer was stopped
+	CancelChan chan struct{}
+
+	//whether if DecreasingTimer is triggered
+	LastTriggerTimer bool
 }
 
-func judgeIfNeedScaleService(service scaling.ServiceQuery, prometheusQuery metrics.PrometheusQueryFetcher, defaultNamespace string, serviceName string) error {
+func (s *Scaler) ScalingBasedOnLoad() {
 	query := fmt.Sprintf("sum(http_requests_in_flight{faas_function=\"%s\",kubernetes_namespace=\"%s\"})by(faas_function,kubernetes_namespace)",
-		serviceName, defaultNamespace)
-	resp, err := prometheusQuery.Fetch(query)
+		s.FunctionName, s.FunctionNamespace)
+	resp, err := s.PrometheusQuery.Fetch(query)
 	if err != nil {
-		return err
+		logrus.Errorf("Unable to query metrics from prometheus, the error is %s", err)
+		return
 	}
 	result := resp.Data.Result
 	if len(result) != 0 {
 		sumLoad, _ := strconv.Atoi(result[0].Value[1].(string))
-		queryResponse, getErr := service.GetReplicas(serviceName, defaultNamespace)
+		queryResponse, getErr := s.GatewayQuery.GetReplicas(s.FunctionName, s.FunctionNamespace)
 		avgLoad := float64(sumLoad) / float64(queryResponse.AvailableReplicas)
-		log.Printf("Current load(in flight request) of function %s.%s is %d, available replicas are %d, average load is %f", serviceName, defaultNamespace,
+		logrus.Infof("Current load(in flight request) of function %s.%s is %d, available replicas are %d, average load is %f", s.FunctionName, s.FunctionNamespace,
 			sumLoad, queryResponse.AvailableReplicas, avgLoad)
 		if getErr == nil {
 			newReplicas := calculateReplicasBasedOnLoad(queryResponse.MaxReplicas, queryResponse.MinReplicas, uint64(sumLoad), queryResponse.TargetLoad)
-			log.Printf("[Scale] function=%s %d => %d.\n", serviceName, queryResponse.Replicas, newReplicas)
-			if newReplicas == queryResponse.Replicas {
-				return nil
+			if newReplicas >= queryResponse.Replicas {
+				if s.DecreasingTimer != nil {
+					if s.DecreasingTimer.Stop() {
+						s.LastTriggerTimer = false
+						s.CancelChan <- struct{}{}
+					}
+				}
+				s.NonDecreasing = true
+				if newReplicas == queryResponse.Replicas {
+					return // not to update replicas
+				}
+			} else if newReplicas < queryResponse.Replicas {
+				if s.NonDecreasing || s.LastTriggerTimer {
+					s.NonDecreasing = false
+					s.LastTriggerTimer = false
+					s.DecreasingTimer = time.NewTimer(s.DecreasingDuration)
+					go s.ScaleDownUsingTimer()
+				}
+				return //not to update replicas
 			}
-			updateErr := service.SetReplicas(serviceName, defaultNamespace, newReplicas)
+			// only newReplicas > queryResponse.Replicas gets to here
+			updateErr := s.GatewayQuery.SetReplicas(s.FunctionName, s.FunctionNamespace, newReplicas)
+			logrus.Infof("[Scale] function=%s %d => %d.", s.FunctionName, queryResponse.Replicas, newReplicas)
 			if updateErr != nil {
-				err = updateErr
+				logrus.Errorf("Unable to set replicas, the error is %s", updateErr.Error())
 			}
+		} else {
+			logrus.Errorf("Unable to get replicas, the error is %s", getErr.Error())
 		}
 	} else {
-		log.Printf("Prometheus scrapes function %s.%s failed, maybe because target down", serviceName, defaultNamespace)
+		logrus.Errorf("Prometheus scrapes function %s.%s failed, maybe because target down", s.FunctionName, s.FunctionNamespace)
 	}
+}
 
-	return err
+func (s *Scaler) ScaleDownUsingTimer() {
+	select {
+	case <-s.DecreasingTimer.C:
+		s.LastTriggerTimer = true
+		query := fmt.Sprintf("sum(http_requests_in_flight{faas_function=\"%s\",kubernetes_namespace=\"%s\"})by(faas_function,kubernetes_namespace)",
+			s.FunctionName, s.FunctionNamespace)
+		resp, err := s.PrometheusQuery.Fetch(query)
+		if err != nil {
+			logrus.Errorf("Unable to query metrics from prometheus, the error is %s", err)
+			return
+		}
+		result := resp.Data.Result
+		if len(result) != 0 {
+			sumLoad, _ := strconv.Atoi(result[0].Value[1].(string))
+			queryResponse, getErr := s.GatewayQuery.GetReplicas(s.FunctionName, s.FunctionNamespace)
+			avgLoad := float64(sumLoad) / float64(queryResponse.AvailableReplicas)
+			logrus.Infof("Current load(in flight request) of function %s.%s is %d, available replicas are %d, average load is %f", s.FunctionName, s.FunctionNamespace,
+				sumLoad, queryResponse.AvailableReplicas, avgLoad)
+			if getErr == nil {
+				newReplicas := calculateReplicasBasedOnLoad(queryResponse.MaxReplicas, queryResponse.MinReplicas, uint64(sumLoad), queryResponse.TargetLoad)
+				updateErr := s.GatewayQuery.SetReplicas(s.FunctionName, s.FunctionNamespace, newReplicas)
+				logrus.Infof("Scale down function=%s %d => %d.\n", s.FunctionName, queryResponse.Replicas, newReplicas)
+				if updateErr != nil {
+					logrus.Errorf("Unable to set replicas, the error is %s", updateErr.Error())
+				}
+			} else {
+				logrus.Errorf("Unable to get replicas, the error is %s", getErr.Error())
+			}
+		} else {
+			logrus.Errorf("Prometheus scrapes function %s.%s failed, maybe because target down", s.FunctionName, s.FunctionNamespace)
+		}
+	case <-s.CancelChan:
+		//exit goroutine
+	}
 }
 
 func calculateReplicasBasedOnLoad(maxReplicas uint64, minReplicas uint64, sumLoad uint64, targetLoad uint64) uint64 {
