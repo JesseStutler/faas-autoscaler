@@ -4,7 +4,11 @@ go 1.17
 
 require (
 	github.com/openfaas/faas-cli v0.0.0-20221104082239-c96c65317e04
+	github.com/openfaas/faas-provider v0.19.1
 	github.com/openfaas/faas/gateway v0.0.0-20221024172349-c07bebbbc9c2
+	github.com/sirupsen/logrus v1.9.0
+	google.golang.org/grpc v1.32.0
+	google.golang.org/protobuf v1.28.1
 )
 
 require (
@@ -22,6 +26,7 @@ require (
 	github.com/docker/docker v20.10.20+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/drone/envsubst v1.0.3 // indirect
+	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-containerregistry v0.12.0 // indirect
@@ -37,7 +42,6 @@ require (
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc2 // indirect
-	github.com/openfaas/faas-provider v0.19.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.13.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
@@ -45,12 +49,13 @@ require (
 	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
-	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/spf13/cobra v1.6.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/vbatts/tar-split v0.11.2 // indirect
+	golang.org/x/net v0.1.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.1.0 // indirect
-	google.golang.org/protobuf v1.28.1 // indirect
+	golang.org/x/text v0.4.0 // indirect
+	google.golang.org/genproto v0.0.0-20200825200019-8632dd797987 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )

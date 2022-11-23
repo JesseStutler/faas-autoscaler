@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+option go_package = "github.com/jessestutler/faas-autoscaler";
+
+package predict;
+
+//#services
+service PredictService {
+  rpc Predict (PredictRequest) returns (PredictResult) {}
+  rpc UpdateModel (UpdateRequest) returns (UpdateResponse) {}
+}
+
+//#messages
+message PredictRequest{
+  repeated double slideWindow = 1;
+}
+
+message PredictResult{
+  repeated double results = 1;
+}
+
+message UpdateRequest{
+  repeated double historyWindow = 1;
+}
+
+message UpdateResponse{
+  double loss = 1;
+}
