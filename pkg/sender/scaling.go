@@ -47,6 +47,8 @@ func (s *Scaler) ScalingBasedOnPrediction(interval time.Duration) {
 	if result != nil {
 		tmp, _ := strconv.Atoi(result.(string))
 		requests = tmp - s.LastCounterVal
+		s.UpdateFreq.Enqueue(requests) //historyWindow
+		s.NormalFreq.Enqueue(requests) //用来进行预测的SlideWindow
 		s.LastCounterVal = tmp
 	}
 	totalDurationQuery := fmt.Sprintf("http_request_duration_seconds_sum{status=\"200\",path=\"/system/function/%s\"}", s.FunctionName)
@@ -63,9 +65,7 @@ func (s *Scaler) ScalingBasedOnPrediction(interval time.Duration) {
 	}
 	serverRate := float64(successRequests) / (durationSum / 60) //处理速率为个/min
 	requestRate := float64(requests) / interval.Minutes()       //实际请求速率个/min
-
-	s.UpdateFreq.Enqueue(requestRate) //historyWindow
-	s.NormalFreq.Enqueue(requestRate) //用来进行预测的SlideWindow
+	logrus.Infof("The function %s.%s's request rate is %f r/min, server rate is %f r/min", s.FunctionName, s.FunctionNamespace, requestRate, serverRate)
 	if s.NormalFreq.IsFull() {
 		if s.PredictFreq.IsFull() {
 			iterN := s.NormalFreq.Data.Iterator()
@@ -106,6 +106,7 @@ func (s *Scaler) ScalingBasedOnPrediction(interval time.Duration) {
 		for k, _ := range slideWindow {
 			slideWindow[k] = freq[k].(float64)
 		}
+		logrus.Infof("The function %s.%s's slidewindow is %v", s.FunctionName, s.FunctionNamespace, slideWindow)
 		predictRequest := &faas_autoscaler.PredictRequest{SlideWindow: slideWindow}
 		predictResult, err := s.PredictClient.Predict(context.Background(), predictRequest, nil)
 		if err != nil {
@@ -113,12 +114,13 @@ func (s *Scaler) ScalingBasedOnPrediction(interval time.Duration) {
 			return
 		}
 		resultsArr := predictResult.GetResults()
+		logrus.Infof("The function %s.%s's predict result is %v", s.FunctionName, s.FunctionNamespace, resultsArr)
+		s.PredictFreq.Enqueue(resultsArr[0]) //请求数只记录返回结果的第一个请求数量（对于多时间步预测多时间步的情况)
 		nextTimeSum := 0.0
 		for _, v := range predictResult.GetResults() {
 			nextTimeSum += v
 		}
 		nextTimeRate := nextTimeSum / float64(len(resultsArr))
-		s.PredictFreq.Enqueue(nextTimeRate)
 		queryResponse, err := s.GatewayQuery.GetReplicas(s.FunctionName, s.FunctionNamespace)
 		if err != nil {
 			logrus.Errorf("Unable to get replicas, the error is %s", err.Error())
